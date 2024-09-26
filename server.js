@@ -96,7 +96,7 @@ app.post('/chat', async (req, res) => {
             model: 'claude-3-sonnet-20240229',
             system: JIRA_FULL_PROMPT,
             max_tokens: 1500,
-            temperature: 0.7,
+            temperature: 0.1,
             messages: [{ role: 'user', content: message }]
         });
         
@@ -131,7 +131,7 @@ app.post('/chat', async (req, res) => {
                         messages: [
                             { role: 'user', content: message },
                             { role: 'assistant', content: content },
-                            { role: 'user', content: `Here is the fucntion result: ${JSON.stringify(functionResult)}, if there is no data in function result, please say that no data available. or else please summarize this information. do not include function_call in this response` }
+                            { role: 'user', content: `Here is the function result: ${JSON.stringify(functionResult)}` }
                         ]
                     });
 

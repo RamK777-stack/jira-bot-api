@@ -112,7 +112,7 @@ app.post('/chat', async (req, res) => {
                 const match = parsedContent.function_call.match(/(\w+)\((.*)\)/);
                 if (match) {
                     const [, functionName, args] = match;
-                    const jql = args.trim().replace(/^["']|["']$/g, '');
+                    const jql = args.trim().replace(/^"|"$/g, '');
                     
                     // Call the appropriate function
                     let functionResult;

@@ -57,12 +57,11 @@ const get_ticket_details = async (ticketId) => {
 };
 
 const get_work_status = async (jql) => {
-    
     try {
         const response = await axios.get(`${JIRA_API_URL}/rest/api/3/search`, {
             params: {
                 jql: jql, // Pass the JQL query in the params
-                fields: 'summary,status,assignee,comment', // Specify the fields you want
+                fields: 'summary,status,assignee,comment,customfield_10020', // Specify the fields you want
             },
             auth: {
                 username: JIRA_API_USER,
@@ -113,11 +112,12 @@ app.post('/chat', async (req, res) => {
                 const match = parsedContent.function_call.match(/(\w+)\((.*)\)/);
                 if (match) {
                     const [, functionName, args] = match;
+                    const jql = args.trim().replace(/^["']|["']$/g, '');
                     
                     // Call the appropriate function
                     let functionResult;
                     if (functionName === 'get_work_status') {
-                        functionResult = await get_work_status(args);
+                        functionResult = await get_work_status(jql);
                     } else if (functionName === 'get_ticket_details') {
                         functionResult = await get_ticket_details(args);
                     }
@@ -131,7 +131,7 @@ app.post('/chat', async (req, res) => {
                         messages: [
                             { role: 'user', content: message },
                             { role: 'assistant', content: content },
-                            { role: 'user', content: `Here is the function result: ${JSON.stringify(functionResult)}` }
+                            { role: 'user', content: `Here is the function result: ${JSON.stringify(functionResult)}, do not use field names from JIRA in your response.` }
                         ]
                     });
 

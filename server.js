@@ -3,7 +3,8 @@ const { Anthropic } = require('@anthropic-ai/sdk');
 const bodyParser = require('body-parser');
 const { default: axios } = require('axios');
 const { JIRA_PROMPT } = require('./lib/config');
-const cors = require('cors');  
+const db = require('./lib/database');
+const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
@@ -12,13 +13,24 @@ const port = process.env.PORT || 3000;
 const JIRA_API_URL = process.env.JIRA_API_URL;
 const JIRA_API_USER = process.env.JIRA_API_USER;
 const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN;
-const JIRA_PROJECT_KEY= process.env.JIRA_PROJECT_KEY
-const JIRA_PROJECT_NAME= process.env.JIRA_PROJECT_NAME
+const JIRA_PROJECT_KEY = process.env.JIRA_PROJECT_KEY
+const JIRA_PROJECT_NAME = process.env.JIRA_PROJECT_NAME
 
 // Initialize Anthropic client
 const anthropic = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+const errorHandler = (err, req, res, next) => {
+    if (err.code === '23505') {
+        // PostgreSQL duplicate entry error
+        return res.status(400).json({ error: 'This email is already on the waitlist.' });
+    } else {
+        // Generic error
+        console.error(err); // Log the actual error for debugging purposes
+        return res.status(500).json({ error: 'Internal Server Error, please try again later.' });
+    }
+}
 
 // Middleware
 app.use(bodyParser.json());
@@ -89,7 +101,7 @@ app.post('/chat', async (req, res) => {
             return res.status(400).json({ error: 'Message is required' });
         }
 
-        let JIRA_FULL_PROMPT = JIRA_PROMPT.replace('{{JIRA_INFO}}', JSON.stringify({JIRA_PROJECT_KEY, JIRA_PROJECT_NAME}));
+        let JIRA_FULL_PROMPT = JIRA_PROMPT.replace('{{JIRA_INFO}}', JSON.stringify({ JIRA_PROJECT_KEY, JIRA_PROJECT_NAME }));
 
         const response = await anthropic.messages.create({
             model: 'claude-3-sonnet-20240229',
@@ -98,7 +110,7 @@ app.post('/chat', async (req, res) => {
             temperature: 0.1,
             messages: [{ role: 'user', content: message }]
         });
-        
+
 
         const content = response.content[0].text;
         // res.json({ content });
@@ -113,7 +125,7 @@ app.post('/chat', async (req, res) => {
                 if (match) {
                     const [, functionName, args] = match;
                     const jql = args.trim().replace(/^"|"$/g, '');
-                    
+
                     // Call the appropriate function
                     let functionResult;
                     if (functionName === 'get_work_status') {
@@ -121,7 +133,7 @@ app.post('/chat', async (req, res) => {
                     } else if (functionName === 'get_ticket_details') {
                         functionResult = await get_ticket_details(args);
                     }
-                    
+
                     // Pass the result back to Claude for summarization
                     const summaryResponse = await anthropic.messages.create({
                         model: 'claude-3-haiku-20240307',
@@ -156,6 +168,39 @@ app.post('/chat', async (req, res) => {
     }
 });
 
+app.post('/join-waitlist', async (req, res, next) => {
+    try {
+        const { email, feedback } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Email is required' });
+        }
+
+        const userIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+        let region = 'Unknown';
+
+        try {
+            const geoResponse = await axios.get(`https://ipinfo.io/${userIp}?token=${process.env.IP_INFO_TOKEN}`);
+            region = geoResponse.data.region; // Extract region (can also use 'country', etc.)
+        } catch (geoError) {
+            console.error('Error fetching geolocation:', geoError.message);
+        }
+
+        // Use the db config to interact with the PostgreSQL database
+        const query = 'INSERT INTO waitlist (email, feedback, region) VALUES ($1, $2, $3) RETURNING id';
+        const values = [email, feedback, region];
+
+        try {
+            const result = await db.query(query, values);
+            res.json({ message: 'You have been added to the waitlist', id: result.rows[0].id });
+        } catch (e) {
+            next(e);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ error: 'An error occurred while processing your request' });
+    }
+})
+
 // Add new routes
 app.get('/jira/ticket', async (req, res) => {
     try {
@@ -181,6 +226,8 @@ app.get('/jira/updated-tickets', async (req, res) => {
         res.status(500).json({ error: 'An error occurred while fetching updated JIRA tickets' });
     }
 });
+
+app.use(errorHandler);
 
 // Start server
 app.listen(port, () => {
